@@ -1,0 +1,78 @@
+name: Build Kernel CI
+
+on:
+  push:
+    branches: [ "main", "selinux", "wifi" ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup environment
+      run: |
+        sudo apt-get update && sudo apt-get install bc flex git ccache automake lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib python3-networkx libxml2-utils bzip2 libbz2-dev libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng -y
+        sudo apt install python-is-python3 build-essential openssl pip -y
+        pip install virtualenv 
+        export PATH=$PATH:$(pwd)/.local/bin
+        sudo apt install python3-virtualenv -y
+        sudo apt install python2.7 -y
+        sudo apt install openssl -y
+        sudo aptitude install libssl-dev -y
+        sudo apt-get install libtinfo5 neofetch -y
+
+        mkdir -p ~/.bin
+        PATH="${pwd}/.bin:${PATH}"
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+        chmod a+rx ~/.bin/repo
+        neofetch
+
+    - name: Set permissions
+      run: sudo chmod +rwx *
+
+    - name: Run build script
+      run: bash ./build_kernel.sh
+
+    - name: List files
+      run: ls $(pwd)/arch/arm64/boot
+
+    - name: Archive build output and send to Telegram
+      run: |
+        COMMIT_TITLE=$(echo "${{ github.event.head_commit.message }}" | head -n 1)
+        echo "Commit Title: $COMMIT_TITLE"
+        
+        mkdir -p output
+        cp -r $(pwd)/arch/arm64/boot/* output/         
+        
+        sudo apt install curl
+        curl -F "chat_id=1735999225" -F "document=@arch/arm64/boot/Image" "https://api.telegram.org/bot7836304917:AAEtxbBM0MPovdNkOlzGojH8g25eCrXNtZ0/sendDocument"
+        curl -F "chat_id=1735999225" -F "document=@arch/arm64/boot/Image.gz" "https://api.telegram.org/bot7836304917:AAEtxbBM0MPovdNkOlzGojH8g25eCrXNtZ0/sendDocument"
+        
+        cp $(pwd)/arch/arm64/boot/Image $(pwd)/anykernel/
+        cd anykernel
+        zip -9 -r ../output/a137f_u6_kernel_TESTING-$COMMIT_TITLE-$(date +%Y-%m-%d).zip ./* 
+        cd ..
+        
+        curl -F "chat_id=1735999225" -F "document=@output/a137f_u6_kernel_TESTING-$COMMIT_TITLE-$(date +%Y-%m-%d).zip" "https://api.telegram.org/bot7836304917:AAEtxbBM0MPovdNkOlzGojH8g25eCrXNtZ0/sendDocument"
+        curl -F "chat_id=-1002124013929" -F "document=@output/a137f_u6_kernel_TESTING-$COMMIT_TITLE-$(date +%Y-%m-%d).zip" -F caption="$COMMIT_TITLE" "https://api.telegram.org/bot7836304917:AAEtxbBM0MPovdNkOlzGojH8g25eCrXNtZ0/sendDocument"
+        
+        # Send message with date and commit title
+        curl -X POST "https://api.telegram.org/bot7836304917:AAEtxbBM0MPovdNkOlzGojH8g25eCrXNtZ0/sendMessage" -d "chat_id=1735999225" -d "text=$(date) $COMMIT_TITLE"
+
+        # Archive the final output
+        tar -czf release.tar.gz output
+        cp release.tar.gz output/
+        curl -F "chat_id=1735999225" -F "document=@output/release.tar.gz" "https://api.telegram.org/bot7836304917:AAEtxbBM0MPovdNkOlzGojH8g25eCrXNtZ0/sendDocument"
+
+    # Uncomment this part if you want to upload to GitHub releases
+    # - name: Upload to Release
+    #   uses: softprops/action-gh-release@master
+    #   with:
+    #     files: |
+    #       output/*
+    #     name: Unofficial kernel for a137f // ${{ env.BUILD_DATE }}
+    #     tag_name: ${{ github.run_id }}
+    #     body: |
+    #       Build: ${{ inputs.MANIFEST_BRANCH }}
+    #       Device: a13ve
+    #       Commit: see the repo - i hope it works
